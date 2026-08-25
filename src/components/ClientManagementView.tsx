@@ -118,6 +118,7 @@ export const ClientManagementView: React.FC<ClientManagementViewProps> = ({
         const query = searchQuery.toLowerCase().trim();
         const matchesName = client.name.toLowerCase().includes(query);
         const matchesCode = client.code.toLowerCase().includes(query);
+        const matchesCoordinator = (client.assignedCoordinator || client.accountManager || '').toLowerCase().includes(query);
         const matchesContact = (client.primaryContact || '').toLowerCase().includes(query);
         const matchesPhone = (client.phone || '').toLowerCase().includes(query);
         const matchesEmail = (client.email || '').toLowerCase().includes(query);
@@ -125,7 +126,7 @@ export const ClientManagementView: React.FC<ClientManagementViewProps> = ({
         const matchesRemarks = (client.remarks || client.notes || '').toLowerCase().includes(query);
         const matchesArea = (client.area || '').toLowerCase().includes(query);
 
-        if (!matchesName && !matchesCode && !matchesContact && !matchesPhone && !matchesEmail && !matchesAddress && !matchesRemarks && !matchesArea) {
+        if (!matchesName && !matchesCode && !matchesCoordinator && !matchesContact && !matchesPhone && !matchesEmail && !matchesAddress && !matchesRemarks && !matchesArea) {
           return false;
         }
       }
@@ -313,11 +314,10 @@ export const ClientManagementView: React.FC<ClientManagementViewProps> = ({
             <thead className="bg-slate-100/90 text-slate-700 uppercase font-bold text-[11px] border-b border-slate-200">
               <tr>
                 <th className="px-4 py-3">Client Name</th>
-                <th className="px-4 py-3">Area</th>
+                <th className="px-4 py-3">Assigned Coordinator</th>
                 <th className="px-4 py-3">Contact Person</th>
                 <th className="px-4 py-3">Contact Number</th>
-                <th className="px-4 py-3 text-center">Active Shipments</th>
-                <th className="px-4 py-3 text-center">Total Shipments</th>
+                <th className="px-4 py-3">Area</th>
                 <th className="px-4 py-3 text-center">Status</th>
                 <th className="px-4 py-3 text-right">Actions</th>
               </tr>
@@ -325,7 +325,7 @@ export const ClientManagementView: React.FC<ClientManagementViewProps> = ({
             <tbody className="divide-y divide-slate-200">
               {filteredClients.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="px-4 py-12 text-center text-slate-500">
+                  <td colSpan={7} className="px-4 py-12 text-center text-slate-500">
                     <Building2 className="w-8 h-8 text-slate-300 mx-auto mb-2" />
                     <p className="font-bold text-slate-700 text-sm">No clients match your filter criteria.</p>
                     <p className="text-xs text-slate-400 mt-1">
@@ -343,8 +343,11 @@ export const ClientManagementView: React.FC<ClientManagementViewProps> = ({
                 </tr>
               ) : (
                 filteredClients.map((client) => {
-                  const stats = clientShipmentStats[client.id] || { total: 0, active: 0 };
                   const isDeactivated = !!client.isDeactivated;
+                  const coordinatorName = client.assignedCoordinator || client.accountManager || '—';
+                  const contactPerson = client.primaryContact && client.primaryContact !== '—' ? client.primaryContact : '—';
+                  const contactPhone = client.phone && client.phone !== '—' ? client.phone : '—';
+                  const areaDisplay = client.area && client.area !== '—' ? client.area : '—';
 
                   return (
                     <tr 
@@ -354,7 +357,7 @@ export const ClientManagementView: React.FC<ClientManagementViewProps> = ({
                       }`}
                     >
                       
-                      {/* Client Name */}
+                      {/* 1. Client Name */}
                       <td className="px-4 py-3.5">
                         <div className="flex flex-col">
                           <button
@@ -368,7 +371,7 @@ export const ClientManagementView: React.FC<ClientManagementViewProps> = ({
                             <span className="font-mono text-[10px] font-semibold text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">
                               {client.code}
                             </span>
-                            {client.industry && (
+                            {client.industry && client.industry !== '—' && (
                               <span className="text-[10px] text-slate-400 truncate max-w-[180px]">
                                 • {client.industry}
                               </span>
@@ -377,49 +380,41 @@ export const ClientManagementView: React.FC<ClientManagementViewProps> = ({
                         </div>
                       </td>
 
-                      {/* Area */}
+                      {/* 2. Assigned Coordinator */}
                       <td className="px-4 py-3.5 whitespace-nowrap">
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium bg-slate-100 text-slate-700 border border-slate-200">
-                          <MapPin className="w-3 h-3 text-slate-500" />
-                          <span>{client.area || 'Luzon'}</span>
-                        </span>
+                        <div className="flex items-center gap-1.5 font-semibold text-slate-900">
+                          <User className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                          <span>{coordinatorName}</span>
+                        </div>
                       </td>
 
-                      {/* Contact Person */}
+                      {/* 3. Contact Person */}
                       <td className="px-4 py-3.5">
-                        <div className="flex items-center gap-1.5 text-slate-800 font-medium">
-                          <User className="w-3 h-3 text-slate-400 shrink-0" />
-                          <span className="truncate max-w-[150px]">{client.primaryContact || '—'}</span>
-                        </div>
+                        <span className="text-slate-700 font-medium truncate max-w-[150px] inline-block">
+                          {contactPerson}
+                        </span>
                       </td>
 
-                      {/* Contact Number */}
+                      {/* 4. Contact Number */}
                       <td className="px-4 py-3.5 whitespace-nowrap">
-                        <div className="flex items-center gap-1.5 text-slate-700">
-                          <Phone className="w-3 h-3 text-slate-400 shrink-0" />
-                          <span>{client.phone || '—'}</span>
-                        </div>
-                      </td>
-
-                      {/* Active Shipments */}
-                      <td className="px-4 py-3.5 text-center whitespace-nowrap">
-                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold ${
-                          stats.active > 0 
-                            ? 'bg-blue-100 text-blue-900 font-black' 
-                            : 'bg-slate-100 text-slate-500'
-                        }`}>
-                          {stats.active}
+                        <span className="text-slate-700 font-mono text-xs">
+                          {contactPhone}
                         </span>
                       </td>
 
-                      {/* Total Shipments */}
-                      <td className="px-4 py-3.5 text-center whitespace-nowrap">
-                        <span className="font-bold text-slate-800 text-xs">
-                          {stats.total}
-                        </span>
+                      {/* 5. Area */}
+                      <td className="px-4 py-3.5 whitespace-nowrap">
+                        {areaDisplay !== '—' ? (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium bg-slate-100 text-slate-700 border border-slate-200">
+                            <MapPin className="w-3 h-3 text-slate-500" />
+                            <span>{areaDisplay}</span>
+                          </span>
+                        ) : (
+                          <span className="text-slate-400">—</span>
+                        )}
                       </td>
 
-                      {/* Status */}
+                      {/* 6. Status */}
                       <td className="px-4 py-3.5 text-center whitespace-nowrap">
                         <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold ${
                           isDeactivated
@@ -431,7 +426,7 @@ export const ClientManagementView: React.FC<ClientManagementViewProps> = ({
                         </span>
                       </td>
 
-                      {/* Actions */}
+                      {/* 7. Actions */}
                       <td className="px-4 py-3.5 text-right whitespace-nowrap">
                         <div className="inline-flex items-center gap-1.5 justify-end">
                           

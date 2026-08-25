@@ -314,6 +314,17 @@ export const ClientDetailView: React.FC<ClientDetailViewProps> = ({
               </p>
             </div>
 
+            {/* Field: Assigned Coordinator */}
+            <div>
+              <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-1">
+                Assigned Coordinator
+              </span>
+              <div className="flex items-center gap-1.5 text-blue-950 font-bold text-xs">
+                <User className="w-3.5 h-3.5 text-blue-700 shrink-0" />
+                <span>{client.assignedCoordinator || client.accountManager || '—'}</span>
+              </div>
+            </div>
+
             {/* Field: Contact Person */}
             <div>
               <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-1">
@@ -372,6 +383,16 @@ export const ClientDetailView: React.FC<ClientDetailViewProps> = ({
                   {isInactive ? 'Inactive (Deactivated)' : 'Active'}
                 </span>
               </div>
+            </div>
+
+            {/* Field: Client Code */}
+            <div>
+              <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-1">
+                Client Code
+              </span>
+              <span className="font-mono text-xs font-bold text-slate-700 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
+                {client.code}
+              </span>
             </div>
 
             {/* Field: Address */}

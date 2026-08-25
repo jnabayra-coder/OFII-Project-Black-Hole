@@ -22,6 +22,22 @@ import {
 } from './forwardingCalculations';
 
 /**
+ * Retrieves the assigned coordinator for a given client name or client ID from the shared client dataset.
+ */
+export function getClientAssignedCoordinator(
+  clients: ClientSummary[],
+  clientNameOrId: string,
+  fallback = 'Alodia Manalansan'
+): string {
+  if (!clientNameOrId) return fallback;
+  const clean = clientNameOrId.trim().toLowerCase();
+  const matched = clients.find(
+    (c) => c.id === clientNameOrId || c.name.trim().toLowerCase() === clean
+  );
+  return matched?.assignedCoordinator || matched?.accountManager || fallback;
+}
+
+/**
  * Deduplicates and finds or creates a shared client record.
  */
 export function ensureClientExists(
@@ -50,20 +66,27 @@ export function ensureClientExists(
   const clientCode = `${acronym}-${Math.floor(100 + Math.random() * 900)}`;
   const newClientId = `client-${cleanName.toLowerCase().replace(/[^a-z0-9]/g, '-')}-${Date.now().toString().slice(-4)}`;
 
+  const newCoordinator = extra?.assignedCoordinator || extra?.accountManager || 'Alodia Manalansan';
+
   const newClient: ClientSummary = {
     id: newClientId,
     name: cleanName,
     code: clientCode,
-    accountManager: extra?.accountManager || 'Maria Santos (OFII Key Accounts)',
-    industry: extra?.industry || 'Commercial Freight & Logistics Consignment',
+    assignedCoordinator: newCoordinator,
+    accountManager: newCoordinator,
+    industry: extra?.industry || '—',
     activeShipments: 1,
     deliveredThisMonth: 0,
-    onTimeRate: 98.0,
-    primaryContact: extra?.primaryContact || 'Logistics Supervisor',
-    email: extra?.email || `logistics@${cleanName.toLowerCase().replace(/[^a-z0-9]/g, '') || 'client'}.com.ph`,
-    phone: extra?.phone || '+63 (2) 8876-0000',
-    address: extra?.address || 'Metro Manila Logistics Terminal',
-    area: extra?.area || 'NCR / Metro Manila',
+    onTimeRate: 100.0,
+    primaryContact: extra?.primaryContact || '—',
+    email: extra?.email || '—',
+    phone: extra?.phone || '—',
+    address: extra?.address || '—',
+    area: extra?.area || '—',
+    remarks: extra?.remarks || '—',
+    notes: extra?.notes || '—',
+    tin: extra?.tin || '—',
+    isDeactivated: false,
     ...extra,
   };
 

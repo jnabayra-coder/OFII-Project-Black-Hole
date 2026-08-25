@@ -39,6 +39,7 @@ import {
   computePodPerformance,
   calculateDaysBetween
 } from '../utils/forwardingCalculations';
+import { getClientAssignedCoordinator } from '../utils/dataSync';
 
 interface ForwardingDetailModalProps {
   record: ForwardingProgressiveRecord;
@@ -78,12 +79,24 @@ export const ForwardingDetailModal: React.FC<ForwardingDetailModalProps> = ({
 
       // Apply Smart Business Rules and calculations on the fly
       if (field === 'client' || field === 'modeOfShipment' || field === 'area') {
+        const selectedClient = field === 'client' ? value : updated.client;
         const autoLeadTime = getAutoDeliveryLeadTime(
-          field === 'client' ? value : updated.client,
+          selectedClient,
           field === 'modeOfShipment' ? value : updated.modeOfShipment,
           field === 'area' ? value : updated.area
         );
         updated.deliveryLeadTimeDays = autoLeadTime;
+
+        if (field === 'client') {
+          const matchedClient = clients.find(
+            c => c.name.trim().toLowerCase() === String(value).trim().toLowerCase() || c.id === value
+          );
+          if (matchedClient?.assignedCoordinator || matchedClient?.accountManager) {
+            updated.coordinator = matchedClient.assignedCoordinator || matchedClient.accountManager || 'Alodia Manalansan';
+          } else {
+            updated.coordinator = getClientAssignedCoordinator(clients, String(value));
+          }
+        }
       }
 
       // Auto-recalculate Delivery TAT & Performance
@@ -291,40 +304,6 @@ export const ForwardingDetailModal: React.FC<ForwardingDetailModalProps> = ({
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 text-xs">
               <div>
-                <label className="block text-[11px] font-semibold text-slate-600 mb-1">Month</label>
-                {isEditing ? (
-                  <input
-                    type="text"
-                    value={formData.month}
-                    onChange={(e) => handleInputChange('month', e.target.value)}
-                    className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded font-medium focus:ring-1 focus:ring-blue-600 focus:outline-none"
-                    placeholder="e.g. August 2026"
-                  />
-                ) : (
-                  <div className="font-semibold text-slate-800 bg-slate-50 px-2.5 py-1.5 rounded border border-slate-200">
-                    {formData.month || '—'}
-                  </div>
-                )}
-              </div>
-
-              <div>
-                <label className="block text-[11px] font-semibold text-slate-600 mb-1">Coordinator</label>
-                {isEditing ? (
-                  <input
-                    type="text"
-                    value={formData.coordinator}
-                    onChange={(e) => handleInputChange('coordinator', e.target.value)}
-                    className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded font-medium focus:ring-1 focus:ring-blue-600 focus:outline-none"
-                    placeholder="e.g. Maria Santos"
-                  />
-                ) : (
-                  <div className="font-semibold text-slate-800 bg-slate-50 px-2.5 py-1.5 rounded border border-slate-200">
-                    {formData.coordinator || '—'}
-                  </div>
-                )}
-              </div>
-
-              <div>
                 <label className="block text-[11px] font-semibold text-slate-600 mb-1">Client Name</label>
                 {isEditing ? (
                   <select
@@ -340,6 +319,49 @@ export const ForwardingDetailModal: React.FC<ForwardingDetailModalProps> = ({
                   <div className="font-bold text-slate-900 bg-slate-50 px-2.5 py-1.5 rounded border border-slate-200 flex items-center justify-between">
                     <span>{formData.client}</span>
                     <Building2 className="w-3.5 h-3.5 text-blue-700" />
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-[11px] font-semibold text-slate-600">Coordinator</label>
+                  {isEditing && (
+                    <span className="text-[10px] text-blue-800 font-bold bg-blue-50 px-1.5 py-0.2 rounded border border-blue-200">
+                      Auto-Assigned
+                    </span>
+                  )}
+                </div>
+                {isEditing ? (
+                  <input
+                    type="text"
+                    readOnly
+                    tabIndex={-1}
+                    value={formData.coordinator}
+                    title="Assigned Coordinator is automatically derived from the selected Client."
+                    className="w-full px-2.5 py-1.5 bg-slate-100/90 border border-slate-300 rounded font-bold text-slate-900 focus:outline-none cursor-not-allowed select-none"
+                    placeholder="Auto-assigned coordinator"
+                  />
+                ) : (
+                  <div className="font-semibold text-slate-800 bg-slate-50 px-2.5 py-1.5 rounded border border-slate-200">
+                    {formData.coordinator || '—'}
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-semibold text-slate-600 mb-1">Month</label>
+                {isEditing ? (
+                  <input
+                    type="text"
+                    value={formData.month}
+                    onChange={(e) => handleInputChange('month', e.target.value)}
+                    className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded font-medium focus:ring-1 focus:ring-blue-600 focus:outline-none"
+                    placeholder="e.g. August 2026"
+                  />
+                ) : (
+                  <div className="font-semibold text-slate-800 bg-slate-50 px-2.5 py-1.5 rounded border border-slate-200">
+                    {formData.month || '—'}
                   </div>
                 )}
               </div>

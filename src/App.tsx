@@ -27,7 +27,8 @@ import { ClientStatusToggleModal } from './components/ClientStatusToggleModal';
 import { ReportsView } from './components/ReportsView';
 import { SettingsView } from './components/SettingsView';
 import { AddDispatchModal, DispatchPrefillData } from './components/AddDispatchModal';
-import { CheckCircle2, X } from 'lucide-react';
+import { CheckCircle2, X, RefreshCw, AlertCircle } from 'lucide-react';
+import { useData } from './context/DataContext';
 
 import { 
   NavigationTab, 
@@ -41,14 +42,6 @@ import {
   OperationalRecordType,
   ForwardingDispatchNotification
 } from './types';
-import { 
-  dashboardSummaryData, 
-  initialDispatches, 
-  initialClients, 
-  initialShipments, 
-  initialForwardingRecords,
-  initialDispatchNotifications
-} from './data/mockData';
 
 export default function App() {
   // 1. Auth State: Login Screen is shown first
@@ -59,12 +52,31 @@ export default function App() {
   const [currentTab, setCurrentTab] = useState<NavigationTab>('dashboard');
   const [selectedHub, setSelectedHub] = useState('OFII Central Hub (Paranaque)');
 
-  // 3. Shared Data State across the system
-  const [dispatches, setDispatches] = useState<DispatchRecord[]>(initialDispatches);
-  const [clients, setClients] = useState<ClientSummary[]>(initialClients);
-  const [shipments, setShipments] = useState<ShipmentRecord[]>(initialShipments);
-  const [forwardingRecords, setForwardingRecords] = useState<ForwardingProgressiveRecord[]>(initialForwardingRecords);
-  const [dispatchNotifications, setDispatchNotifications] = useState<ForwardingDispatchNotification[]>(initialDispatchNotifications);
+  // 3. Centralized Database Context (Supabase Cloud + Cross-Tab Sync)
+  const {
+    clients,
+    dispatches,
+    shipments,
+    forwardingRecords,
+    notifications: dispatchNotifications,
+    isLoading,
+    loadingMessage,
+    errorMessage,
+    addClient,
+    updateClient,
+    toggleClientStatus,
+    addDispatch,
+    updateDispatch,
+    addForwardingRecord,
+    updateForwardingRecord,
+    updateShipment,
+    softDeleteRecord,
+    restoreRecord,
+    permanentDeleteRecord,
+    dismissNotification,
+    completeNotification,
+    showSuccessToast
+  } = useData();
 
   // 4. Confirmation Toast / Alert
   const [confirmationToast, setConfirmationToast] = useState<{ 
@@ -180,7 +192,7 @@ export default function App() {
   };
 
   // ---------------------------------------------------------------------------
-  // SAFE DELETE & RECOVERY WORKFLOW HANDLERS
+  // SAFE DELETE & RECOVERY WORKFLOW HANDLERS (Connected to Database)
   // ---------------------------------------------------------------------------
 
   // 1. Request Move to Trash (Safe Delete Modal triggers)
@@ -215,7 +227,6 @@ export default function App() {
   };
 
   const handleRequestDeleteClient = (client: ClientSummary) => {
-    // Check if client has historical shipments or forwarding records
     const clientShipmentHistory = shipments.filter(
       s => s.clientId === client.id || s.client.toLowerCase() === client.name.toLowerCase()
     );
@@ -226,10 +237,8 @@ export default function App() {
     const totalHistoricalRecords = clientShipmentHistory.length + clientForwardingHistory.length;
 
     if (totalHistoricalRecords > 0) {
-      // RULE: Client with historical records must be DEACTIVATED, not permanently deleted!
       setClientDeactivateTarget(client);
     } else {
-      // Fresh client with no records can be moved to trash
       setSafeDeleteTarget({
         id: client.id,
         type: 'client',
@@ -240,106 +249,43 @@ export default function App() {
     }
   };
 
-  // 2. Execute Move to Trash (Soft Delete)
-  const handleConfirmMoveToTrash = () => {
+  // 2. Execute Move to Trash (Soft Delete in Database)
+  const handleConfirmMoveToTrash = async () => {
     if (!safeDeleteTarget) return;
 
     const { id, type, identifier, clientName } = safeDeleteTarget;
-    const nowIso = new Date().toISOString();
-    const currentUser = 'Operations Officer (OFII Control)';
 
-    if (type === 'dispatch') {
-      setDispatches(prev => prev.map(d => d.id === id ? {
-        ...d,
-        isDeleted: true,
-        deletedAt: nowIso,
-        deletedBy: currentUser
-      } : d));
-      if (selectedDispatch?.id === id) {
-        setSelectedDispatch(null);
-      }
-    } else if (type === 'shipment') {
-      setShipments(prev => prev.map(s => s.id === id ? {
-        ...s,
-        isDeleted: true,
-        deletedAt: nowIso,
-        deletedBy: currentUser
-      } : s));
-      if (selectedShipment?.id === id) {
-        setSelectedShipment(null);
-      }
-    } else if (type === 'forwarding_report') {
-      setForwardingRecords(prev => prev.map(f => f.id === id ? {
-        ...f,
-        isDeleted: true,
-        deletedAt: nowIso,
-        deletedBy: currentUser
-      } : f));
-      if (selectedForwardingRecord?.id === id) {
-        setSelectedForwardingRecord(null);
-      }
-    } else if (type === 'client') {
-      setClients(prev => prev.map(c => c.id === id ? {
-        ...c,
-        isDeleted: true,
-        deletedAt: nowIso,
-        deletedBy: currentUser
-      } : c));
-      if (selectedClientId === id) {
-        setSelectedClientId(null);
-      }
+    try {
+      await softDeleteRecord(id, type, 'Moved to Trash via Operations Console');
+      if (selectedDispatch?.id === id) setSelectedDispatch(null);
+      if (selectedShipment?.id === id) setSelectedShipment(null);
+      if (selectedForwardingRecord?.id === id) setSelectedForwardingRecord(null);
+      if (selectedClientId === id) setSelectedClientId(null);
+
+      setSafeDeleteTarget(null);
+
+      setConfirmationToast({
+        message: 'Record moved to Recently Deleted.',
+        subtext: `"${identifier || clientName}" has been removed from active lists and can be restored from the Trash section at any time.`
+      });
+      setTimeout(() => setConfirmationToast(null), 5000);
+    } catch (err: any) {
+      alert('Unable to delete record. Please check your connection.');
     }
-
-    setSafeDeleteTarget(null);
-
-    setConfirmationToast({
-      message: 'Record moved to Recently Deleted.',
-      subtext: `"${identifier || clientName}" has been removed from active lists and can be restored from the Trash section at any time.`
-    });
-    setTimeout(() => {
-      setConfirmationToast(null);
-    }, 5000);
   };
 
-  // 3. Execute Restore from Trash
-  const handleRestoreFromTrash = (type: OperationalRecordType, id: string) => {
-    if (type === 'dispatch') {
-      setDispatches(prev => prev.map(d => d.id === id ? {
-        ...d,
-        isDeleted: false,
-        deletedAt: undefined,
-        deletedBy: undefined
-      } : d));
-    } else if (type === 'shipment') {
-      setShipments(prev => prev.map(s => s.id === id ? {
-        ...s,
-        isDeleted: false,
-        deletedAt: undefined,
-        deletedBy: undefined
-      } : s));
-    } else if (type === 'forwarding_report') {
-      setForwardingRecords(prev => prev.map(f => f.id === id ? {
-        ...f,
-        isDeleted: false,
-        deletedAt: undefined,
-        deletedBy: undefined
-      } : f));
-    } else if (type === 'client') {
-      setClients(prev => prev.map(c => c.id === id ? {
-        ...c,
-        isDeleted: false,
-        deletedAt: undefined,
-        deletedBy: undefined
-      } : c));
+  // 3. Execute Restore from Trash in Database
+  const handleRestoreFromTrash = async (type: OperationalRecordType, id: string) => {
+    try {
+      await restoreRecord(id, type);
+      setConfirmationToast({
+        message: 'Record restored to active operational list.',
+        subtext: `The ${type.replace('_', ' ')} record has been restored with all relationships intact.`
+      });
+      setTimeout(() => setConfirmationToast(null), 5000);
+    } catch (err: any) {
+      alert('Unable to restore record. Please check your connection.');
     }
-
-    setConfirmationToast({
-      message: 'Record restored to active operational list.',
-      subtext: `The ${type.replace('_', ' ')} record has been restored with all relationships intact.`
-    });
-    setTimeout(() => {
-      setConfirmationToast(null);
-    }, 5000);
   };
 
   // 4. Request Permanent Delete (Modal opener)
@@ -352,39 +298,29 @@ export default function App() {
     setPermanentDeleteTarget({ id, type, identifier, clientName });
   };
 
-  // 5. Execute Permanent Delete (Irreversible Purge)
-  const handleConfirmPermanentDelete = () => {
+  // 5. Execute Permanent Delete (Purge from Database)
+  const handleConfirmPermanentDelete = async () => {
     if (!permanentDeleteTarget) return;
 
     const { id, type, identifier, clientName } = permanentDeleteTarget;
 
-    if (type === 'dispatch') {
-      setDispatches(prev => prev.filter(d => d.id !== id));
-    } else if (type === 'shipment') {
-      setShipments(prev => prev.filter(s => s.id !== id));
-    } else if (type === 'forwarding_report') {
-      setForwardingRecords(prev => prev.filter(f => f.id !== id));
-    } else if (type === 'client') {
-      setClients(prev => prev.filter(c => c.id !== id));
+    try {
+      await permanentDeleteRecord(id, type);
+      setPermanentDeleteTarget(null);
+
+      setConfirmationToast({
+        message: 'Record permanently deleted.',
+        subtext: `"${identifier || clientName}" has been permanently purged from the database.`
+      });
+      setTimeout(() => setConfirmationToast(null), 5000);
+    } catch (err: any) {
+      alert('Unable to purge record. Please check your connection.');
     }
-
-    setPermanentDeleteTarget(null);
-
-    setConfirmationToast({
-      message: 'Record permanently deleted.',
-      subtext: `"${identifier || clientName}" has been permanently purged from the system.`
-    });
-    setTimeout(() => {
-      setConfirmationToast(null);
-    }, 5000);
   };
 
-  // 6. Client Deactivation & Reactivation (Rule: Preserve history)
-  const handleConfirmDeactivateClient = (clientId: string, reason?: string) => {
-    setClients(prev => prev.map(c => c.id === clientId ? {
-      ...c,
-      isDeactivated: true
-    } : c));
+  // 6. Client Deactivation & Reactivation in Database
+  const handleConfirmDeactivateClient = async (clientId: string, reason?: string) => {
+    await toggleClientStatus(clientId, reason || 'Deactivated by Operations');
     setClientDeactivateTarget(null);
 
     const client = clients.find(c => c.id === clientId);
@@ -392,33 +328,26 @@ export default function App() {
       message: 'Client account deactivated.',
       subtext: `Client "${client?.name || clientId}" is now marked as Deactivated. All historical shipment and forwarding records remain preserved in the system.`
     });
-    setTimeout(() => {
-      setConfirmationToast(null);
-    }, 5000);
+    setTimeout(() => setConfirmationToast(null), 5000);
   };
 
-  const handleReactivateClient = (clientId: string) => {
-    setClients(prev => prev.map(c => c.id === clientId ? {
-      ...c,
-      isDeactivated: false
-    } : c));
+  const handleReactivateClient = async (clientId: string) => {
+    await toggleClientStatus(clientId);
 
     const client = clients.find(c => c.id === clientId);
     setConfirmationToast({
       message: 'Client account reactivated.',
       subtext: `Client "${client?.name || clientId}" is now active and available for new dispatches.`
     });
-    setTimeout(() => {
-      setConfirmationToast(null);
-    }, 5000);
+    setTimeout(() => setConfirmationToast(null), 5000);
   };
 
   // ---------------------------------------------------------------------------
-  // OPERATIONAL CREATION & UPDATE HANDLERS
+  // OPERATIONAL CREATION & UPDATE HANDLERS (Connected to Supabase)
   // ---------------------------------------------------------------------------
 
   // Add Dispatch Record with Automatic Client & Shipment Synchronization
-  const handleAddDispatchRecord = (newDispatch: DispatchRecord, originNotificationId?: string) => {
+  const handleAddDispatchRecord = async (newDispatch: DispatchRecord, originNotificationId?: string) => {
     // 0. Duplicate Protection Guard
     const existingDuplicate = dispatches.find(
       d => !d.isDeleted && d.podNumber.trim().toLowerCase() === newDispatch.podNumber.trim().toLowerCase()
@@ -432,186 +361,62 @@ export default function App() {
       return;
     }
 
-    // 1. Check if client exists in Shared Client Master List
-    const existingClientIndex = clients.findIndex(
-      c => c.name.toLowerCase() === newDispatch.clientName.toLowerCase()
-    );
+    try {
+      // 1. Ensure client is in database
+      const existingClient = clients.find(
+        c => c.name.toLowerCase() === newDispatch.clientName.toLowerCase()
+      );
 
-    let targetClient: ClientSummary;
+      let targetClientName = newDispatch.clientName;
+      if (!existingClient) {
+        const saved = await addClient({
+          name: newDispatch.clientName,
+          address: `${newDispatch.destination}, NCR`,
+          area: 'NCR',
+        });
+        targetClientName = saved.name;
+      }
 
-    if (existingClientIndex >= 0) {
-      const existing = clients[existingClientIndex];
-      targetClient = {
-        ...existing,
-        activeShipments: newDispatch.status === 'Delivered' 
-          ? (existing.activeShipments || 0) 
-          : (existing.activeShipments || 0) + 1,
-        deliveredThisMonth: newDispatch.status === 'Delivered'
-          ? (existing.deliveredThisMonth || 0) + 1
-          : (existing.deliveredThisMonth || 0),
-      };
-      setClients(prev => prev.map((c, i) => i === existingClientIndex ? targetClient : c));
-    } else {
-      const words = newDispatch.clientName.split(/\s+/);
-      const acronym = words.length === 1 ? words[0].slice(0, 3).toUpperCase() : words.map(w => w[0]).join('').slice(0, 4).toUpperCase();
-      const clientCode = `${acronym}-${Math.floor(100 + Math.random() * 900)}`;
-      const newClientId = `client-${newDispatch.clientName.toLowerCase().replace(/[^a-z0-9]/g, '-')}-${Date.now().toString().slice(-4)}`;
+      // 2. Add Dispatch to database
+      await addDispatch({
+        ...newDispatch,
+        clientName: targetClientName,
+      });
 
-      targetClient = {
-        id: newClientId,
-        name: newDispatch.clientName,
-        code: clientCode,
-        accountManager: 'Maria Santos (OFII Key Accounts)',
-        industry: 'General Logistics & FMCG',
-        activeShipments: newDispatch.status === 'Delivered' ? 0 : 1,
-        deliveredThisMonth: newDispatch.status === 'Delivered' ? 1 : 0,
-        onTimeRate: 98.0,
-        primaryContact: 'Operations Manager',
-        email: `dispatch@${newDispatch.clientName.toLowerCase().replace(/[^a-z0-9]/g, '') || 'client'}.com.ph`,
-        phone: '+63 (2) 8876-0000',
-        address: `${newDispatch.destination}, NCR`,
-        area: 'NCR',
-      };
+      // 3. Complete linked notification if applicable
+      if (originNotificationId) {
+        await completeNotification(originNotificationId, newDispatch.id);
+      }
 
-      setClients(prev => [targetClient, ...prev]);
+      setPrefillDispatchData(null);
+    } catch (err: any) {
+      alert('Unable to save dispatch. Please check your connection.');
     }
-
-    // 2. Add to Daily Dispatches
-    const normalizedDispatch: DispatchRecord = {
-      ...newDispatch,
-      clientName: targetClient.name,
-    };
-    setDispatches(prev => [normalizedDispatch, ...prev]);
-
-    // 3. Mark Notification as Completed (if linked)
-    if (originNotificationId) {
-      setDispatchNotifications(prev => prev.map(notif => 
-        notif.id === originNotificationId 
-          ? { 
-              ...notif, 
-              status: 'COMPLETED', 
-              completedAt: new Date().toISOString(), 
-              completedDispatchId: normalizedDispatch.id 
-            } 
-          : notif
-      ));
-    } else {
-      // Also match by POD number if any existing pending notification exists
-      setDispatchNotifications(prev => prev.map(notif => 
-        notif.podNumber.trim().toLowerCase() === newDispatch.podNumber.trim().toLowerCase() && notif.status !== 'COMPLETED'
-          ? { 
-              ...notif, 
-              status: 'COMPLETED', 
-              completedAt: new Date().toISOString(), 
-              completedDispatchId: normalizedDispatch.id 
-            } 
-          : notif
-      ));
-    }
-
-    // Reset prefill state
-    setPrefillDispatchData(null);
-
-    // 4. Automatically Create Corresponding Shipment Monitoring Record
-    const autoShipment: ShipmentRecord = {
-      id: `SHP-${newDispatch.podNumber || newDispatch.manifestNumber || newDispatch.id}`,
-      client: targetClient.name,
-      clientId: targetClient.id,
-      monthStarted: new Date().toLocaleString('default', { month: 'long' }),
-      bookedDate: newDispatch.deliveryDate,
-      pickupDate: newDispatch.deliveryDate,
-      consignee: newDispatch.consignee || newDispatch.destination,
-      contactNumber: '+63 917 555 0199',
-      modeOfShipment: newDispatch.deliveryType === 'Air Freight' ? 'Air Freight' : 'Land Freight',
-      originPickupPoint: 'OFII Paranaque Central Terminal',
-      destination: newDispatch.destination,
-      area: 'NCR',
-      requestedDeliveryDate: newDispatch.plannedDeliveryDate || newDispatch.deliveryDate,
-      itemDescription: `${newDispatch.quantityCasesBoxes || 100} ${newDispatch.unit || 'Cases'} Commercial Cargo`,
-      quantityBoxes: newDispatch.quantityCasesBoxes || 100,
-      amount: 'PHP 1,250,000.00',
-      actualCbm: 12.5,
-      volumeWeight: 180.0,
-      actualWeightKg: newDispatch.totalWeightKg || 250,
-      chargePerWeight: 'PHP 25.00 / kg',
-      vanNumber: 'VAN-PAR-01',
-      truckPlate: newDispatch.plateNumber,
-      estimatedDeparture: `${newDispatch.deliveryDate} ${newDispatch.departureTime || '08:00 AM'}`,
-      actualDeparture: `${newDispatch.deliveryDate} ${newDispatch.departureTime || '08:30 AM'}`,
-      estimatedArrival: `${newDispatch.plannedDeliveryDate || newDispatch.deliveryDate} 06:00 PM`,
-      actualArrival: newDispatch.status === 'Delivered' ? newDispatch.plannedDeliveryDate : 'In Transit',
-      podNumber: newDispatch.podNumber,
-      awbNumber: `AWB-${newDispatch.podNumber}`,
-      drNumber: `DR-${newDispatch.manifestNumber || newDispatch.podNumber}`,
-      sealNumber: 'SEAL-OFII-8891',
-      billOfLandingNumber: 'BL-OFII-9042',
-      manifestNumber: newDispatch.manifestNumber,
-      plannedDeliveryDate: newDispatch.plannedDeliveryDate || newDispatch.deliveryDate,
-      actualDeliveryDate: newDispatch.status === 'Delivered' ? newDispatch.plannedDeliveryDate : '',
-      deliveryDate: newDispatch.status === 'Delivered' ? newDispatch.plannedDeliveryDate : 'In Transit',
-      receiversName: 'Authorized Consignee Representative',
-      datePodReceived: newDispatch.status === 'Delivered' ? 'POD In-Hand' : 'Pending',
-      dateTransmitted: newDispatch.deliveryDate,
-      deliveryRemarks: newDispatch.remarks || 'Standard OFII Consolidated Freight Run',
-      status: mapDispatchStatusToShipmentStatus(newDispatch.status),
-      leadTime: '2 Days',
-      tatNumber: `TAT-NCR-${Math.floor(100 + Math.random() * 900)}`,
-      deliveryPerformance: 'On-Time',
-      numberOfDays: 2,
-    };
-
-    setShipments(prev => [autoShipment, ...prev]);
-
-    // 5. Show success toast notification
-    setConfirmationToast({
-      message: 'Dispatch successfully encoded.',
-      subtext: `Synced with Client Shipment Monitoring (POD: ${newDispatch.podNumber}) • Client: ${targetClient.name}`
-    });
-    setTimeout(() => {
-      setConfirmationToast(null);
-    }, 5000);
   };
 
   // Add / Edit Shared Client Handler
-  const handleAddNewClient = (newClient: ClientSummary) => {
-    setClients(prev => {
-      const exists = prev.some(c => c.name.toLowerCase() === newClient.name.toLowerCase());
-      if (exists) return prev;
-      return [newClient, ...prev];
-    });
-
-    setConfirmationToast({
-      message: 'Client added successfully.',
-      subtext: `Client "${newClient.name}" (${newClient.code}) is now active across all monitoring modules.`
-    });
-    setTimeout(() => {
-      setConfirmationToast(null);
-    }, 5000);
+  const handleAddNewClient = async (newClient: ClientSummary) => {
+    try {
+      await addClient(newClient);
+    } catch (err: any) {
+      alert('Unable to add client. Please check your connection.');
+    }
   };
 
-  const handleSaveClientFromForm = (savedClient: ClientSummary) => {
+  const handleSaveClientFromForm = async (savedClient: ClientSummary) => {
     const isEdit = clients.some(c => c.id === savedClient.id);
-
-    if (isEdit) {
-      setClients(prev => prev.map(c => c.id === savedClient.id ? savedClient : c));
-      if (selectedManagementClient?.id === savedClient.id) {
-        setSelectedManagementClient(savedClient);
+    try {
+      if (isEdit) {
+        await updateClient(savedClient);
+        if (selectedManagementClient?.id === savedClient.id) {
+          setSelectedManagementClient(savedClient);
+        }
+      } else {
+        await addClient(savedClient);
       }
-      setConfirmationToast({
-        message: 'Client information updated successfully.',
-        subtext: `Master record for "${savedClient.name}" has been updated.`
-      });
-    } else {
-      setClients(prev => [savedClient, ...prev]);
-      setConfirmationToast({
-        message: 'Client added successfully.',
-        subtext: `Client "${savedClient.name}" (${savedClient.code}) has been created and is available across the system.`
-      });
+    } catch (err: any) {
+      alert('Unable to save client. Please check your connection.');
     }
-
-    setTimeout(() => {
-      setConfirmationToast(null);
-    }, 5000);
   };
 
   const handleOpenAddClientModal = () => {
@@ -630,223 +435,70 @@ export default function App() {
     setClientStatusToggle({ isOpen: true, client, mode: 'reactivate' });
   };
 
-  const handleConfirmClientStatusToggle = (clientId: string) => {
+  const handleConfirmClientStatusToggle = async (clientId: string) => {
     const isDeactivating = clientStatusToggle.mode === 'deactivate';
-    
-    setClients(prev => prev.map(c => c.id === clientId ? {
-      ...c,
-      isDeactivated: isDeactivating
-    } : c));
+    await toggleClientStatus(clientId);
+    setClientStatusToggle({ isOpen: false, client: null, mode: 'deactivate' });
 
     const targetClient = clients.find(c => c.id === clientId);
-    const updatedClient = targetClient ? { ...targetClient, isDeactivated: isDeactivating } : null;
-    
-    if (selectedManagementClient?.id === clientId && updatedClient) {
-      setSelectedManagementClient(updatedClient);
+    if (selectedManagementClient?.id === clientId && targetClient) {
+      setSelectedManagementClient({ ...targetClient, isDeactivated: isDeactivating });
     }
-
-    setConfirmationToast({
-      message: isDeactivating ? 'Client account deactivated.' : 'Client account reactivated.',
-      subtext: isDeactivating 
-        ? `Client "${targetClient?.name || clientId}" is now inactive. Historical shipments remain preserved.`
-        : `Client "${targetClient?.name || clientId}" is now active and available for new dispatches.`
-    });
-
-    setTimeout(() => {
-      setConfirmationToast(null);
-    }, 5000);
   };
 
   // Handle Updates in Daily Dispatch
   const handleUpdateDispatches = (updated: DispatchRecord[]) => {
-    setDispatches(updated);
+    // updates already handled via single dispatch edits
   };
 
   // Handle Save Single Dispatch from Details Modal
-  const handleSaveSingleDispatch = (updatedDispatch: DispatchRecord) => {
-    setDispatches(prev => prev.map(d => d.id === updatedDispatch.id ? updatedDispatch : d));
-    setSelectedDispatch(updatedDispatch);
-
-    // Synchronize with Client Shipment Monitoring
-    setShipments(prev => prev.map(s => {
-      if (s.podNumber === updatedDispatch.podNumber || s.manifestNumber === updatedDispatch.manifestNumber) {
-        return {
-          ...s,
-          truckPlate: updatedDispatch.plateNumber,
-          destination: updatedDispatch.destination,
-          consignee: updatedDispatch.consignee,
-          quantityBoxes: updatedDispatch.quantityCasesBoxes,
-          status: mapDispatchStatusToShipmentStatus(updatedDispatch.status),
-          plannedDeliveryDate: updatedDispatch.plannedDeliveryDate,
-          actualDeliveryDate: updatedDispatch.status === 'Delivered' ? updatedDispatch.plannedDeliveryDate : s.actualDeliveryDate,
-          deliveryDate: updatedDispatch.status === 'Delivered' ? updatedDispatch.plannedDeliveryDate : s.deliveryDate,
-          actualDeparture: `${updatedDispatch.deliveryDate} ${updatedDispatch.departureTime || ''}`.trim(),
-        };
-      }
-      return s;
-    }));
-
-    setConfirmationToast({
-      message: 'Dispatch record updated.',
-      subtext: `Changes saved for POD ${updatedDispatch.podNumber} and synchronized across monitoring modules.`
-    });
-    setTimeout(() => setConfirmationToast(null), 4000);
+  const handleSaveSingleDispatch = async (updatedDispatch: DispatchRecord) => {
+    try {
+      await updateDispatch(updatedDispatch);
+      setSelectedDispatch(updatedDispatch);
+    } catch (err: any) {
+      alert('Unable to update dispatch. Please check your connection.');
+    }
   };
 
   // Handle Updates in Client Shipment
-  const handleUpdateShipment = (updatedShipment: ShipmentRecord) => {
-    setShipments(prev => prev.map(s => s.id === updatedShipment.id ? updatedShipment : s));
-    setSelectedShipment(updatedShipment);
+  const handleUpdateShipment = async (updatedShipment: ShipmentRecord) => {
+    try {
+      await updateShipment(updatedShipment);
+      setSelectedShipment(updatedShipment);
+    } catch (err: any) {
+      alert('Unable to update shipment. Please check your connection.');
+    }
   };
 
   // Forwarding Progressive Report Handlers with Shared Client Sync
-  const handleAddForwardingRecord = (newRecord: ForwardingProgressiveRecord, clientName: string) => {
+  const handleAddForwardingRecord = async (newRecord: ForwardingProgressiveRecord, clientName: string) => {
     const rawClientName = (clientName || newRecord.client || 'General Client').trim();
+    try {
+      // Ensure client exists
+      const existing = clients.find(c => c.name.toLowerCase() === rawClientName.toLowerCase());
+      let targetClientId = existing?.id;
+      if (!existing) {
+        const saved = await addClient({
+          name: rawClientName,
+          area: newRecord.area,
+        });
+        targetClientId = saved.id;
+      }
 
-    // 1. Sync Shared Client List
-    const existingIndex = clients.findIndex(
-      c => c.name.trim().toLowerCase() === rawClientName.toLowerCase()
-    );
-
-    let targetClient: ClientSummary;
-
-    if (existingIndex >= 0) {
-      const existing = clients[existingIndex];
-      targetClient = {
-        ...existing,
-        activeShipments: newRecord.deliveryStatus === 'Delivered' 
-          ? (existing.activeShipments || 0) 
-          : (existing.activeShipments || 0) + 1,
-        deliveredThisMonth: newRecord.deliveryStatus === 'Delivered'
-          ? (existing.deliveredThisMonth || 0) + 1
-          : (existing.deliveredThisMonth || 0),
-      };
-      setClients(prev => prev.map((c, i) => i === existingIndex ? targetClient : c));
-    } else {
-      const words = rawClientName.split(/\s+/);
-      const acronym = words.length === 1 ? words[0].slice(0, 3).toUpperCase() : words.map(w => w[0]).join('').slice(0, 4).toUpperCase();
-      const clientCode = `${acronym}-${Math.floor(100 + Math.random() * 900)}`;
-      const newClientId = `client-${rawClientName.toLowerCase().replace(/[^a-z0-9]/g, '-')}-${Date.now().toString().slice(-4)}`;
-
-      targetClient = {
-        id: newClientId,
-        name: rawClientName,
-        code: clientCode,
-        accountManager: 'Maria Santos (OFII Key Accounts)',
-        industry: 'Forwarding & Freight Consignment',
-        activeShipments: newRecord.deliveryStatus === 'Delivered' ? 0 : 1,
-        deliveredThisMonth: newRecord.deliveryStatus === 'Delivered' ? 1 : 0,
-        onTimeRate: 98.5,
-        primaryContact: newRecord.consignee || 'Logistics In-Charge',
-        email: `contact@${rawClientName.toLowerCase().replace(/[^a-z0-9]/g, '') || 'client'}.com.ph`,
-        phone: '+63 (2) 8892-0000',
-        address: `${newRecord.destinationCode} Regional Terminal, ${newRecord.area}`,
-        area: newRecord.area,
-      };
-
-      setClients(prev => [targetClient, ...prev]);
+      await addForwardingRecord({
+        ...newRecord,
+        client: rawClientName,
+        clientId: targetClientId,
+      });
+    } catch (err: any) {
+      alert('Unable to add forwarding record. Please check your connection.');
     }
-
-    // 2. Add to Forwarding Records
-    const normalizedForwardingRecord: ForwardingProgressiveRecord = {
-      ...newRecord,
-      client: targetClient.name,
-      clientId: targetClient.id,
-    };
-    setForwardingRecords(prev => [normalizedForwardingRecord, ...prev]);
-
-    // 3. Keep Client Shipment Monitoring synchronized
-    const correspondingShipment: ShipmentRecord = {
-      id: `SHP-FPR-${newRecord.id.replace('FPR-2026-', '')}`,
-      client: targetClient.name,
-      clientId: targetClient.id,
-      monthStarted: newRecord.month,
-      bookedDate: newRecord.actualDispatchDate,
-      pickupDate: newRecord.actualDispatchDate,
-      consignee: newRecord.consignee,
-      contactNumber: '+63 917 555 0192',
-      modeOfShipment: newRecord.modeOfShipment,
-      originPickupPoint: 'OFII Paranaque Central Cargo Terminal',
-      destination: `${newRecord.destinationCode} - ${newRecord.consignee}`,
-      area: newRecord.area,
-      requestedDeliveryDate: newRecord.actualDeliveryDate || newRecord.actualDispatchDate,
-      itemDescription: `${newRecord.quantity} ${newRecord.unit} Commercial Cargo Consignment`,
-      quantityBoxes: newRecord.quantity,
-      amount: newRecord.declaredValue || 'PHP 1,500,000.00',
-      actualCbm: newRecord.cbm || 10.0,
-      volumeWeight: newRecord.volumeWeightKg || 150.0,
-      actualWeightKg: newRecord.actualWeightKg || 200,
-      chargePerWeight: 'PHP 25.00 / kg',
-      vanNumber: `VAN-${newRecord.destinationCode}-01`,
-      truckPlate: 'OFII-FLEET',
-      estimatedDeparture: `${newRecord.actualDispatchDate} 08:00 AM`,
-      actualDeparture: `${newRecord.actualDispatchDate} 08:30 AM`,
-      estimatedArrival: `${newRecord.actualDeliveryDate || newRecord.actualDispatchDate} 05:00 PM`,
-      actualArrival: newRecord.deliveryStatus === 'Delivered' ? newRecord.actualDeliveryDate : 'In Transit',
-      podNumber: newRecord.podNumber,
-      awbNumber: newRecord.awbCourierRefNumber,
-      drNumber: `DR-${newRecord.referenceNumber.replace('PRJ-', '')}`,
-      sealNumber: `SEAL-OFII-${Math.floor(10000 + Math.random() * 90000)}`,
-      billOfLandingNumber: `BL-OFII-${Math.floor(10000 + Math.random() * 90000)}`,
-      manifestNumber: `MNF-${newRecord.destinationCode}-2026`,
-      plannedDeliveryDate: newRecord.actualDeliveryDate || newRecord.actualDispatchDate,
-      actualDeliveryDate: newRecord.actualDeliveryDate || '',
-      deliveryDate: newRecord.actualDeliveryDate || 'In Transit',
-      receiversName: newRecord.receiversName || 'Authorized Consignee Signatory',
-      datePodReceived: newRecord.dateOfPodReturn || 'Pending',
-      dateTransmitted: newRecord.actualDispatchDate,
-      deliveryRemarks: newRecord.reasonForDelay || 'Standard Forwarding Freight Dispatch',
-      status: newRecord.deliveryStatus === 'Delivered' ? 'Delivered' : (newRecord.deliveryStatus === 'Delayed' ? 'Delayed' : 'In Transit'),
-      leadTime: `${newRecord.deliveryLeadTimeDays} Days`,
-      tatNumber: `TAT-${newRecord.destinationCode}-${Math.floor(100 + Math.random() * 900)}`,
-      deliveryPerformance: newRecord.deliveryPerformance === 'HIT' ? 'On-Time' : (newRecord.deliveryPerformance === 'MISSED' ? 'Delayed' : 'Within SLA'),
-      numberOfDays: newRecord.deliveryTatDays,
-    };
-    setShipments(prev => [correspondingShipment, ...prev]);
-
-    // 4. Generate Forwarding -> Dispatch Notification (Do NOT automatically create full dispatch record)
-    const newDispatchNotification: ForwardingDispatchNotification = {
-      id: `FDN-${Date.now()}`,
-      forwardingRecordId: normalizedForwardingRecord.id,
-      client: targetClient.name,
-      clientId: targetClient.id,
-      consignee: normalizedForwardingRecord.consignee,
-      podNumber: normalizedForwardingRecord.podNumber,
-      referenceNumber: normalizedForwardingRecord.referenceNumber,
-      deliveryDate: normalizedForwardingRecord.actualDispatchDate || normalizedForwardingRecord.actualDeliveryDate || '2026-08-24',
-      modeOfShipment: normalizedForwardingRecord.modeOfShipment,
-      area: normalizedForwardingRecord.area,
-      quantity: normalizedForwardingRecord.quantity,
-      unit: normalizedForwardingRecord.unit,
-      destination: normalizedForwardingRecord.destinationCode 
-        ? `${normalizedForwardingRecord.destinationCode} - ${normalizedForwardingRecord.consignee}` 
-        : normalizedForwardingRecord.consignee,
-      destinationCode: normalizedForwardingRecord.destinationCode,
-      source: 'Forwarding Progressive Report',
-      message: 'A new shipment has been added to the Forwarding Progressive Report. Complete the required dispatch information.',
-      status: 'NEW',
-      createdAt: new Date().toISOString(),
-    };
-    setDispatchNotifications(prev => [newDispatchNotification, ...prev]);
-
-    // 5. Trigger Confirmation Toast
-    setConfirmationToast({
-      message: 'Forwarding record created successfully.',
-      subtext: `Ref: ${newRecord.referenceNumber} • Forwarding → Dispatch notification sent to Daily Dispatching Monitoring.`
-    });
-    setTimeout(() => {
-      setConfirmationToast(null);
-    }, 5000);
   };
 
   // Handler: Complete Dispatch from Forwarding Notification
   const handleCompleteDispatchFromNotification = (notification: ForwardingDispatchNotification) => {
-    // 1. Mark notification as In Progress
-    setDispatchNotifications(prev => prev.map(n => 
-      n.id === notification.id ? { ...n, status: 'IN PROGRESS' } : n
-    ));
-
-    // 2. Set prefilled data for the Add Dispatch modal
+    // 1. Set prefilled data for the Add Dispatch modal
     setPrefillDispatchData({
       clientName: notification.client,
       consignee: notification.consignee,
@@ -861,28 +513,22 @@ export default function App() {
       notificationId: notification.id,
     });
 
-    // 3. Open the modal
+    // 2. Open the modal
     setIsAddDispatchOpen(true);
   };
 
-  // Handler: Dismiss notification
-  const handleDismissDispatchNotification = (notificationId: string) => {
-    setDispatchNotifications(prev => prev.map(n => 
-      n.id === notificationId ? { ...n, isDismissed: true } : n
-    ));
+  // Handler: Dismiss notification in database
+  const handleDismissDispatchNotification = async (notificationId: string) => {
+    await dismissNotification(notificationId);
   };
 
-  const handleUpdateForwardingRecord = (updatedRecord: ForwardingProgressiveRecord) => {
-    setForwardingRecords(prev => prev.map(r => r.id === updatedRecord.id ? updatedRecord : r));
-    setSelectedForwardingRecord(updatedRecord);
-
-    setConfirmationToast({
-      message: 'Changes saved successfully.',
-      subtext: `Ref: ${updatedRecord.referenceNumber} updated. Delivery Performance: ${updatedRecord.deliveryPerformance} • POD Status: ${updatedRecord.podStatus}`
-    });
-    setTimeout(() => {
-      setConfirmationToast(null);
-    }, 5000);
+  const handleUpdateForwardingRecord = async (updatedRecord: ForwardingProgressiveRecord) => {
+    try {
+      await updateForwardingRecord(updatedRecord);
+      setSelectedForwardingRecord(updatedRecord);
+    } catch (err: any) {
+      alert('Unable to update forwarding record. Please check your connection.');
+    }
   };
 
   // 1. If not logged in, render corporate Login Screen or Create Account Screen
@@ -1000,30 +646,34 @@ export default function App() {
                 {selectedManagementClient ? (
                   <ClientDetailView
                     client={selectedManagementClient}
-                    shipments={shipments}
                     dispatches={dispatches}
+                    shipments={shipments}
                     forwardingRecords={forwardingRecords}
                     onBack={() => setSelectedManagementClient(null)}
                     onEditClient={handleOpenEditClientModal}
                     onDeactivateClient={handleOpenDeactivateClientModal}
                     onReactivateClient={handleOpenReactivateClientModal}
-                    onSelectShipment={(shipment) => {
-                      setSelectedShipment(shipment);
-                      setSelectedClientId(shipment.clientId || selectedManagementClient.id);
-                      setCurrentTab('clients');
+                    onDeleteClient={handleRequestDeleteClient}
+                    onSelectDispatch={setSelectedDispatch}
+                    onSelectShipment={setSelectedShipment}
+                    onSelectForwardingRecord={(rec) => {
+                      setSelectedForwardingRecord(rec);
+                      setIsForwardingDetailEditMode(false);
+                      setCurrentTab('forwarding_report');
                     }}
                   />
                 ) : (
                   <ClientManagementView
                     clients={clients}
-                    shipments={shipments}
                     dispatches={dispatches}
+                    shipments={shipments}
                     forwardingRecords={forwardingRecords}
-                    onOpenAddClient={handleOpenAddClientModal}
-                    onViewClient={(client) => setSelectedManagementClient(client)}
+                    onSelectClient={setSelectedManagementClient}
+                    onOpenAddClientModal={handleOpenAddClientModal}
                     onEditClient={handleOpenEditClientModal}
                     onDeactivateClient={handleOpenDeactivateClientModal}
                     onReactivateClient={handleOpenReactivateClientModal}
+                    onDeleteClient={handleRequestDeleteClient}
                   />
                 )}
               </>
@@ -1037,19 +687,16 @@ export default function App() {
                     shipment={selectedShipment}
                     onBack={() => setSelectedShipment(null)}
                     onUpdateShipment={handleUpdateShipment}
-                    onRequestDelete={handleRequestDeleteShipment}
+                    onRequestDeleteShipment={handleRequestDeleteShipment}
                   />
                 ) : (
                   <ClientShipmentView
-                    clients={clients}
                     shipments={shipments}
+                    clients={clients}
                     selectedClientId={selectedClientId}
                     onSelectClient={setSelectedClientId}
                     onSelectShipment={setSelectedShipment}
-                    onAddNewClient={handleAddNewClient}
                     onRequestDeleteShipment={handleRequestDeleteShipment}
-                    onRequestDeactivateClient={handleRequestDeleteClient}
-                    onRequestReactivateClient={handleReactivateClient}
                   />
                 )}
               </>
@@ -1065,176 +712,164 @@ export default function App() {
                   setIsForwardingDetailEditMode(false);
                 }}
                 onOpenAddModal={() => setIsAddForwardingOpen(true)}
-                onQuickEditRecord={(rec) => {
+                onRequestDeleteRecord={handleRequestDeleteForwarding}
+                onEditRecord={(rec) => {
                   setSelectedForwardingRecord(rec);
                   setIsForwardingDetailEditMode(true);
                 }}
-                onRequestDeleteRecord={handleRequestDeleteForwarding}
               />
             )}
 
-            {/* TAB 5: RECENTLY DELETED / TRASH */}
+            {/* TAB 5: LOGISTICS & SLA REPORTS */}
+            {currentTab === 'reports' && (
+              <ReportsView
+                dispatches={dispatches}
+                shipments={shipments}
+                forwardingRecords={forwardingRecords}
+                clients={clients}
+                onSelectDispatch={setSelectedDispatch}
+                onSelectShipment={setSelectedShipment}
+              />
+            )}
+
+            {/* TAB 6: RECENTLY DELETED / TRASH (RECOVERY VIEW) */}
             {currentTab === 'trash' && (
               <RecentlyDeletedView
                 dispatches={dispatches}
                 shipments={shipments}
                 forwardingRecords={forwardingRecords}
                 clients={clients}
-                onRestoreRecord={handleRestoreFromTrash}
-                onPermanentDeleteRecord={(type, id) => {
-                  const record = type === 'dispatch' ? dispatches.find(d => d.id === id) :
-                    type === 'shipment' ? shipments.find(s => s.id === id) :
-                    type === 'forwarding_report' ? forwardingRecords.find(f => f.id === id) :
-                    clients.find(c => c.id === id);
-                  const identifier = (record as any)?.podNumber || (record as any)?.referenceNumber || (record as any)?.code || id;
-                  const clientName = (record as any)?.clientName || (record as any)?.client || (record as any)?.name || 'Client';
-                  handleRequestPermanentDelete(type, id, identifier, clientName);
-                }}
-                onRequestPermanentDelete={handleRequestPermanentDelete}
+                onRestore={handleRestoreFromTrash}
+                onPermanentDelete={handleRequestPermanentDelete}
               />
             )}
 
-            {/* TAB 6: REPORTS */}
-            {currentTab === 'reports' && (
-              <ReportsView />
-            )}
-
-            {/* TAB 7: SETTINGS */}
+            {/* TAB 7: SETTINGS VIEW */}
             {currentTab === 'settings' && (
-              <SettingsView />
+              <SettingsView
+                onAddNewClient={handleAddNewClient}
+                onSaveClient={handleSaveClientFromForm}
+                clients={clients}
+              />
             )}
 
           </div>
         </main>
       </div>
 
-      {/* Slide-over / Modal: Dispatch Detail */}
+      {/* ---------------- MODALS & OVERLAYS ---------------- */}
+
+      {/* 1. Add Daily Dispatch Modal */}
+      {isAddDispatchOpen && (
+        <AddDispatchModal
+          isOpen={isAddDispatchOpen}
+          onClose={() => {
+            setIsAddDispatchOpen(false);
+            setPrefillDispatchData(null);
+          }}
+          onAdd={handleAddDispatchRecord}
+          prefillData={prefillDispatchData}
+          clients={clients}
+        />
+      )}
+
+      {/* 2. Dispatch Detail / Edit Modal */}
       {selectedDispatch && (
         <DispatchDetailModal
           dispatch={selectedDispatch}
           onClose={() => setSelectedDispatch(null)}
-          onSelectClient={handleSelectClientFromDashboard}
-          onSaveDispatch={handleSaveSingleDispatch}
+          onSave={handleSaveSingleDispatch}
           onRequestDelete={handleRequestDeleteDispatch}
+        />
+      )}
+
+      {/* 3. Add Forwarding Record Modal */}
+      {isAddForwardingOpen && (
+        <AddForwardingRecordModal
+          isOpen={isAddForwardingOpen}
+          onClose={() => setIsAddForwardingOpen(false)}
+          onAdd={handleAddForwardingRecord}
           clients={clients}
         />
       )}
 
-      {/* Modal: Add New Dispatch */}
-      <AddDispatchModal
-        isOpen={isAddDispatchOpen}
-        onClose={() => {
-          setIsAddDispatchOpen(false);
-          setPrefillDispatchData(null);
-        }}
-        onAddDispatch={handleAddDispatchRecord}
-        clients={clients}
-        onAddNewClient={handleAddNewClient}
-        initialPrefillData={prefillDispatchData}
-        existingDispatches={dispatches}
-        onViewExistingDispatch={(dispatch) => {
-          setSelectedDispatch(dispatch);
-          setIsAddDispatchOpen(false);
-          setPrefillDispatchData(null);
-        }}
-      />
-
-      {/* Modal: Forwarding Progressive Record Details (View & Edit) */}
+      {/* 4. Forwarding Detail & Edit Modal */}
       {selectedForwardingRecord && (
         <ForwardingDetailModal
           record={selectedForwardingRecord}
-          clients={clients}
-          isOpen={true}
+          isOpen={!!selectedForwardingRecord}
+          initialEditMode={isForwardingDetailEditMode}
           onClose={() => {
             setSelectedForwardingRecord(null);
             setIsForwardingDetailEditMode(false);
           }}
-          onSaveRecord={handleUpdateForwardingRecord}
+          onSave={handleUpdateForwardingRecord}
           onRequestDelete={handleRequestDeleteForwarding}
-          initialEditMode={isForwardingDetailEditMode}
         />
       )}
 
-      {/* Modal: Add Forwarding Progressive Record */}
-      <AddForwardingRecordModal
-        isOpen={isAddForwardingOpen}
-        onClose={() => setIsAddForwardingOpen(false)}
-        clients={clients}
-        onAddRecord={handleAddForwardingRecord}
-        onOpenAddClientModal={(initialName) => {
-          if (initialName) {
-            handleAddNewClient({
-              id: `client-${Date.now()}`,
-              name: initialName,
-              code: `${initialName.slice(0, 3).toUpperCase()}-${Math.floor(100 + Math.random() * 900)}`,
-              accountManager: 'Maria Santos (OFII Key Accounts)',
-              industry: 'General Forwarding Consignment',
-              activeShipments: 1,
-              deliveredThisMonth: 0,
-              onTimeRate: 98.0,
-              primaryContact: 'Logistics Supervisor',
-              email: `contact@${initialName.toLowerCase().replace(/[^a-z0-9]/g, '') || 'client'}.com.ph`,
-              phone: '+63 (2) 8876-0000',
-              address: 'Metro Manila Distribution Center',
-              area: 'NCR',
-            });
-          }
-        }}
-      />
+      {/* 5. Safe Delete (Soft Delete to Trash) Modal */}
+      {safeDeleteTarget && (
+        <SafeDeleteModal
+          isOpen={!!safeDeleteTarget}
+          recordType={safeDeleteTarget.type}
+          identifier={safeDeleteTarget.identifier}
+          clientName={safeDeleteTarget.clientName}
+          additionalInfo={safeDeleteTarget.additionalInfo}
+          onClose={() => setSafeDeleteTarget(null)}
+          onConfirm={handleConfirmMoveToTrash}
+        />
+      )}
 
-      {/* 1. Confirmation Modal: Safe Delete (Move to Trash) */}
-      <SafeDeleteModal
-        isOpen={!!safeDeleteTarget}
-        onClose={() => setSafeDeleteTarget(null)}
-        onConfirm={handleConfirmMoveToTrash}
-        recordType={safeDeleteTarget?.type || 'dispatch'}
-        recordIdentifier={safeDeleteTarget?.identifier}
-        clientName={safeDeleteTarget?.clientName}
-        additionalInfo={safeDeleteTarget?.additionalInfo}
-      />
+      {/* 6. Permanent Delete (Purge) Modal */}
+      {permanentDeleteTarget && (
+        <PermanentDeleteModal
+          isOpen={!!permanentDeleteTarget}
+          recordType={permanentDeleteTarget.type}
+          identifier={permanentDeleteTarget.identifier}
+          clientName={permanentDeleteTarget.clientName}
+          onClose={() => setPermanentDeleteTarget(null)}
+          onConfirm={handleConfirmPermanentDelete}
+        />
+      )}
 
-      {/* 2. Confirmation Modal: Permanent Delete (Irreversible from Trash) */}
-      <PermanentDeleteModal
-        isOpen={!!permanentDeleteTarget}
-        onClose={() => setPermanentDeleteTarget(null)}
-        onConfirm={handleConfirmPermanentDelete}
-        recordType={permanentDeleteTarget?.type || 'dispatch'}
-        recordIdentifier={permanentDeleteTarget?.identifier}
-        clientName={permanentDeleteTarget?.clientName}
-      />
+      {/* 7. Client Deactivate instead of Delete Protection Modal */}
+      {clientDeactivateTarget && (
+        <ClientDeactivateModal
+          isOpen={!!clientDeactivateTarget}
+          client={clientDeactivateTarget}
+          dispatchesCount={dispatches.filter(d => d.clientName.toLowerCase() === clientDeactivateTarget.name.toLowerCase()).length}
+          shipmentsCount={shipments.filter(s => s.clientId === clientDeactivateTarget.id || s.client.toLowerCase() === clientDeactivateTarget.name.toLowerCase()).length}
+          forwardingCount={forwardingRecords.filter(f => f.clientId === clientDeactivateTarget.id || f.client.toLowerCase() === clientDeactivateTarget.name.toLowerCase()).length}
+          onClose={() => setClientDeactivateTarget(null)}
+          onConfirmDeactivate={handleConfirmDeactivateClient}
+        />
+      )}
 
-      {/* 3. Confirmation Modal: Client Deactivation Rule (History Preservation) */}
-      <ClientDeactivateModal
-        client={clientDeactivateTarget}
-        isOpen={!!clientDeactivateTarget}
-        onClose={() => setClientDeactivateTarget(null)}
-        hasHistoricalRecords={true}
-        historicalRecordsCount={
-          clientDeactivateTarget 
-            ? (shipments.filter(s => s.clientId === clientDeactivateTarget.id || s.client.toLowerCase() === clientDeactivateTarget.name.toLowerCase()).length +
-               forwardingRecords.filter(f => f.clientId === clientDeactivateTarget.id || f.client.toLowerCase() === clientDeactivateTarget.name.toLowerCase()).length)
-            : 0
-        }
-        onConfirmDeactivate={handleConfirmDeactivateClient}
-        onConfirmReactivate={handleReactivateClient}
-      />
+      {/* 8. Client Management: Create / Edit Client Modal */}
+      {clientFormModal.isOpen && (
+        <ClientFormModal
+          isOpen={clientFormModal.isOpen}
+          clientToEdit={clientFormModal.clientToEdit}
+          onClose={() => setClientFormModal({ isOpen: false, clientToEdit: null })}
+          onSave={handleSaveClientFromForm}
+        />
+      )}
 
-      {/* 4. Client Management Modal: Add / Edit Client */}
-      <ClientFormModal
-        isOpen={clientFormModal.isOpen}
-        onClose={() => setClientFormModal({ isOpen: false, clientToEdit: null })}
-        onSaveClient={handleSaveClientFromForm}
-        clientToEdit={clientFormModal.clientToEdit}
-      />
+      {/* 9. Client Management: Deactivate / Reactivate Modal */}
+      {clientStatusToggle.isOpen && clientStatusToggle.client && (
+        <ClientStatusToggleModal
+          isOpen={clientStatusToggle.isOpen}
+          client={clientStatusToggle.client}
+          mode={clientStatusToggle.mode}
+          dispatchesCount={dispatches.filter(d => d.clientName.toLowerCase() === clientStatusToggle.client?.name.toLowerCase()).length}
+          shipmentsCount={shipments.filter(s => s.clientId === clientStatusToggle.client?.id || s.client.toLowerCase() === clientStatusToggle.client?.name.toLowerCase()).length}
+          forwardingCount={forwardingRecords.filter(f => f.clientId === clientStatusToggle.client?.id || f.client.toLowerCase() === clientStatusToggle.client?.name.toLowerCase()).length}
+          onClose={() => setClientStatusToggle({ isOpen: false, client: null, mode: 'deactivate' })}
+          onConfirm={handleConfirmClientStatusToggle}
+        />
+      )}
 
-      {/* 5. Client Management Modal: Status Toggle (Deactivate / Reactivate) */}
-      <ClientStatusToggleModal
-        isOpen={clientStatusToggle.isOpen}
-        onClose={() => setClientStatusToggle({ isOpen: false, client: null, mode: 'deactivate' })}
-        client={clientStatusToggle.client}
-        mode={clientStatusToggle.mode}
-        onConfirm={handleConfirmClientStatusToggle}
-      />
     </div>
   );
 }

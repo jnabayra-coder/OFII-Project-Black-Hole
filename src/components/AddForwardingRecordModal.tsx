@@ -33,6 +33,9 @@ import {
   computeDeliveryPerformance, 
   computePodPerformance 
 } from '../utils/forwardingCalculations';
+import { getClientAssignedCoordinator } from '../utils/dataSync';
+import { UnsavedChangesModal } from './UnsavedChangesModal';
+import { DispatchRecord } from '../types';
 
 interface AddForwardingRecordModalProps {
   isOpen: boolean;
@@ -40,6 +43,8 @@ interface AddForwardingRecordModalProps {
   clients: ClientSummary[];
   onAddRecord: (newRecord: ForwardingProgressiveRecord, clientName: string) => void;
   onOpenAddClientModal?: (initialName?: string) => void;
+  existingRecords?: ForwardingProgressiveRecord[];
+  existingDispatches?: DispatchRecord[];
 }
 
 export const AddForwardingRecordModal: React.FC<AddForwardingRecordModalProps> = ({
@@ -48,11 +53,13 @@ export const AddForwardingRecordModal: React.FC<AddForwardingRecordModalProps> =
   clients,
   onAddRecord,
   onOpenAddClientModal,
+  existingRecords = [],
+  existingDispatches = [],
 }) => {
   // Form State with intelligent defaults
   const [month, setMonth] = useState('August 2026');
-  const [coordinator, setCoordinator] = useState('Maria Santos');
   const [clientName, setClientName] = useState('Intelligent Skin Care Inc.');
+  const [coordinator, setCoordinator] = useState('Rojay');
   const [modeOfShipment, setModeOfShipment] = useState<ForwardingMode>('RORO');
   const [area, setArea] = useState<PhilippineArea>('Visayas');
   const [referenceNumber, setReferenceNumber] = useState(`PRJ-ISCI-${Math.floor(100 + Math.random() * 900)}`);
@@ -91,6 +98,48 @@ export const AddForwardingRecordModal: React.FC<AddForwardingRecordModalProps> =
   const [podLeadTimeDays, setPodLeadTimeDays] = useState<number>(3);
   const [podReasonForDelay, setPodReasonForDelay] = useState('');
 
+  // System States
+  const [isDirty, setIsDirty] = useState(false);
+  const [showUnsavedPrompt, setShowUnsavedPrompt] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  // Reset states on open
+  useEffect(() => {
+    if (isOpen) {
+      setIsDirty(false);
+      setShowUnsavedPrompt(false);
+      setErrorMessage(null);
+    }
+  }, [isOpen]);
+
+  // DUPLICATE CHECK
+  const matchingDuplicate = React.useMemo(() => {
+    const cleanPod = podNumber.trim().toLowerCase();
+    const cleanRef = referenceNumber.trim().toLowerCase();
+
+    if (cleanPod) {
+      const matchInForwarding = existingRecords.find(r => !r.isDeleted && r.podNumber?.trim().toLowerCase() === cleanPod);
+      if (matchInForwarding) return { type: 'POD', val: matchInForwarding.podNumber };
+      const matchInDispatch = existingDispatches.find(d => !d.isDeleted && d.podNumber.trim().toLowerCase() === cleanPod);
+      if (matchInDispatch) return { type: 'POD', val: matchInDispatch.podNumber };
+    }
+
+    if (cleanRef) {
+      const matchInForwardingRef = existingRecords.find(r => !r.isDeleted && r.referenceNumber?.trim().toLowerCase() === cleanRef);
+      if (matchInForwardingRef) return { type: 'Reference', val: matchInForwardingRef.referenceNumber };
+    }
+
+    return null;
+  }, [podNumber, referenceNumber, existingRecords, existingDispatches]);
+
+  // Auto retrieve Coordinator whenever Client changes
+  useEffect(() => {
+    if (clientName) {
+      const assigned = getClientAssignedCoordinator(clients, clientName);
+      setCoordinator(assigned);
+    }
+  }, [clientName, clients]);
+
   // Auto calculate Lead Time whenever Client, Mode, or Area changes
   useEffect(() => {
     const calculatedLeadTime = getAutoDeliveryLeadTime(clientName, modeOfShipment, area);
@@ -127,8 +176,27 @@ export const AddForwardingRecordModal: React.FC<AddForwardingRecordModalProps> =
 
   if (!isOpen) return null;
 
+  const handleAttemptClose = () => {
+    if (isDirty) {
+      setShowUnsavedPrompt(true);
+    } else {
+      onClose();
+    }
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    setErrorMessage(null);
+
+    if (!clientName.trim() || !referenceNumber.trim()) {
+      setErrorMessage('Unable to save record. Please try again.');
+      return;
+    }
+
+    if (matchingDuplicate) {
+      setErrorMessage('A record with this POD or Reference Number already exists.');
+      return;
+    }
 
     const newRecord: ForwardingProgressiveRecord = {
       id: `FPR-2026-${Math.floor(100 + Math.random() * 900)}`,
@@ -171,51 +239,74 @@ export const AddForwardingRecordModal: React.FC<AddForwardingRecordModalProps> =
   };
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-2xs flex items-center justify-center p-3 sm:p-4">
-      <div className="bg-white w-full max-w-5xl rounded-xl shadow-2xl border border-slate-300 flex flex-col max-h-[92vh] overflow-hidden animate-in fade-in zoom-in-95 duration-200">
-        
-        {/* Modal Header */}
-        <div className="bg-blue-800 text-white px-6 py-4 border-b border-blue-900 flex items-center justify-between shrink-0">
-          <div className="flex items-center space-x-3">
-            <div className="w-9 h-9 rounded bg-white/10 flex items-center justify-center text-white font-bold border border-white/20">
-              <Plus className="w-5 h-5" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h2 className="text-base font-bold text-white tracking-tight">
-                  Add Forwarding Progressive Record
-                </h2>
-                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-950/80 text-blue-200 border border-blue-600">
-                  Automated SLA Calculation
-                </span>
+    <>
+      <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-2xs flex items-center justify-center p-3 sm:p-4">
+        <div className="bg-white w-full max-w-5xl rounded-xl shadow-2xl border border-slate-300 flex flex-col max-h-[92vh] overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+          
+          {/* Modal Header */}
+          <div className="bg-blue-800 text-white px-6 py-4 border-b border-blue-900 flex items-center justify-between shrink-0">
+            <div className="flex items-center space-x-3">
+              <div className="w-9 h-9 rounded bg-white/10 flex items-center justify-center text-white font-bold border border-white/20">
+                <Plus className="w-5 h-5" />
               </div>
-              <p className="text-xs text-blue-100">
-                Log a new shipment with smart field inheritance and auto-calculated TAT & Performance.
-              </p>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h2 className="text-base font-bold text-white tracking-tight">
+                    Add Forwarding Progressive Record
+                  </h2>
+                  <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-950/80 text-blue-200 border border-blue-600">
+                    Automated SLA Calculation
+                  </span>
+                </div>
+                <p className="text-xs text-blue-100">
+                  Log a new shipment with smart field inheritance and auto-calculated TAT & Performance.
+                </p>
+              </div>
             </div>
+
+            <button
+              type="button"
+              onClick={handleAttemptClose}
+              className="p-1.5 text-blue-200 hover:text-white rounded hover:bg-blue-700/60 transition-colors cursor-pointer"
+            >
+              <X className="w-5 h-5" />
+            </button>
           </div>
 
-          <button
-            type="button"
-            onClick={onClose}
-            className="p-1.5 text-blue-200 hover:text-white rounded hover:bg-blue-700/60 transition-colors cursor-pointer"
+          {/* Business Rule Active Notification Banner */}
+          {isBusinessRuleApplied && (
+            <div className="bg-purple-50 border-b border-purple-200 px-6 py-2 flex items-center gap-2 text-xs text-purple-900 animate-in fade-in">
+              <Sparkles className="w-4 h-4 text-purple-700 shrink-0" />
+              <span>
+                <strong>Company Business Rule Auto-Applied:</strong> Mode = <em>RORO</em> + Client = <em>Intelligent Skin Care Inc.</em> + Area = <em>Visayas</em> &rarr; Delivery Lead Time set to <strong>13 Days</strong>.
+              </span>
+            </div>
+          )}
+
+          {/* Duplicate Alert Banner */}
+          {matchingDuplicate && (
+            <div className="bg-amber-50 border-b border-amber-300 px-6 py-2.5 flex items-center gap-2.5 text-xs text-amber-950 animate-in fade-in">
+              <AlertTriangle className="w-4 h-4 text-amber-700 shrink-0" />
+              <span>
+                <strong>A record with this POD or Reference Number already exists.</strong> (Duplicate {matchingDuplicate.type}: <em>{matchingDuplicate.val}</em>). Please verify the details before saving.
+              </span>
+            </div>
+          )}
+
+          {/* Error Alert Banner */}
+          {errorMessage && (
+            <div className="bg-rose-50 border-b border-rose-300 px-6 py-2.5 flex items-center gap-2.5 text-xs text-rose-900 animate-in fade-in">
+              <AlertTriangle className="w-4 h-4 text-rose-700 shrink-0" />
+              <span className="font-semibold">{errorMessage}</span>
+            </div>
+          )}
+
+          {/* Scrollable Form Body */}
+          <form 
+            onSubmit={handleSubmit} 
+            onChange={() => setIsDirty(true)}
+            className="flex-1 overflow-y-auto p-6 space-y-6 bg-slate-50/50"
           >
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-
-        {/* Business Rule Active Notification Banner */}
-        {isBusinessRuleApplied && (
-          <div className="bg-purple-50 border-b border-purple-200 px-6 py-2 flex items-center gap-2 text-xs text-purple-900 animate-in fade-in">
-            <Sparkles className="w-4 h-4 text-purple-700 shrink-0" />
-            <span>
-              <strong>Company Business Rule Auto-Applied:</strong> Mode = <em>RORO</em> + Client = <em>Intelligent Skin Care Inc.</em> + Area = <em>Visayas</em> &rarr; Delivery Lead Time set to <strong>13 Days</strong>.
-            </span>
-          </div>
-        )}
-
-        {/* Scrollable Form Body */}
-        <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-6 space-y-6 bg-slate-50/50">
           
           {/* SECTION 1: PROJECT / CLIENT INFORMATION */}
           <div className="bg-white rounded-lg border border-slate-200 p-4 shadow-2xs">
@@ -229,6 +320,47 @@ export const AddForwardingRecordModal: React.FC<AddForwardingRecordModalProps> =
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 text-xs">
               <div>
                 <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                  Client Name <span className="text-rose-500">*</span>
+                </label>
+                <SearchableClientSelect
+                  clients={clients}
+                  value={clientName}
+                  onChange={(val, clientObj) => {
+                    setClientName(val);
+                    if (clientObj?.assignedCoordinator || clientObj?.accountManager) {
+                      setCoordinator(clientObj.assignedCoordinator || clientObj.accountManager || 'Alodia Manalansan');
+                    } else {
+                      setCoordinator(getClientAssignedCoordinator(clients, val));
+                    }
+                  }}
+                  onOpenAddClientModal={onOpenAddClientModal}
+                  placeholder="Select or enter client name..."
+                  required
+                />
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-[11px] font-semibold text-slate-600">
+                    Coordinator <span className="text-rose-500">*</span>
+                  </label>
+                  <span className="text-[10px] text-blue-800 font-bold bg-blue-50 px-1.5 py-0.2 rounded border border-blue-200">
+                    Auto-Assigned
+                  </span>
+                </div>
+                <input
+                  type="text"
+                  readOnly
+                  tabIndex={-1}
+                  value={coordinator}
+                  title="Assigned Coordinator is automatically retrieved from Client Management based on the selected Client."
+                  placeholder="Auto-assigned coordinator"
+                  className="w-full px-2.5 py-1.5 bg-slate-100/90 border border-slate-300 rounded font-bold text-slate-900 focus:outline-none cursor-not-allowed select-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-semibold text-slate-600 mb-1">
                   Month <span className="text-rose-500">*</span>
                 </label>
                 <input
@@ -238,34 +370,6 @@ export const AddForwardingRecordModal: React.FC<AddForwardingRecordModalProps> =
                   onChange={(e) => setMonth(e.target.value)}
                   placeholder="e.g. August 2026"
                   className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded font-medium focus:ring-1 focus:ring-blue-600 focus:outline-none"
-                />
-              </div>
-
-              <div>
-                <label className="block text-[11px] font-semibold text-slate-600 mb-1">
-                  Coordinator <span className="text-rose-500">*</span>
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={coordinator}
-                  onChange={(e) => setCoordinator(e.target.value)}
-                  placeholder="e.g. Maria Santos"
-                  className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded font-medium focus:ring-1 focus:ring-blue-600 focus:outline-none"
-                />
-              </div>
-
-              <div>
-                <label className="block text-[11px] font-semibold text-slate-600 mb-1">
-                  Client Name <span className="text-rose-500">*</span>
-                </label>
-                <SearchableClientSelect
-                  clients={clients}
-                  value={clientName}
-                  onChange={(val) => setClientName(val)}
-                  onOpenAddClientModal={onOpenAddClientModal}
-                  placeholder="Select or enter client name..."
-                  required
                 />
               </div>
 
@@ -743,7 +847,7 @@ export const AddForwardingRecordModal: React.FC<AddForwardingRecordModalProps> =
           <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-200">
             <button
               type="button"
-              onClick={onClose}
+              onClick={handleAttemptClose}
               className="px-4 py-2 rounded text-xs font-semibold bg-slate-200 hover:bg-slate-300 text-slate-800 transition-colors cursor-pointer"
             >
               CANCEL
@@ -759,5 +863,19 @@ export const AddForwardingRecordModal: React.FC<AddForwardingRecordModalProps> =
         </form>
       </div>
     </div>
-  );
+
+    {/* Unsaved Changes Confirmation Modal */}
+    <UnsavedChangesModal
+      isOpen={showUnsavedPrompt}
+      onKeepEditing={() => setShowUnsavedPrompt(false)}
+      onConfirmDiscard={() => {
+        setShowUnsavedPrompt(false);
+        setIsDirty(false);
+        onClose();
+      }}
+      title="Unsaved Changes"
+      message="You have unsaved changes. Are you sure you want to leave?"
+    />
+  </>
+);
 };

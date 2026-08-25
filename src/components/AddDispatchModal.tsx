@@ -27,6 +27,7 @@ import { SearchableClientSelect } from './SearchableClientSelect';
 import { AddClientModal } from './AddClientModal';
 import { MilitaryTimeInput } from './MilitaryTimeInput';
 import { getAutoDeliveryLeadTime } from '../utils/forwardingCalculations';
+import { UnsavedChangesModal } from './UnsavedChangesModal';
 
 export interface DispatchPrefillData {
   clientName?: string;
@@ -110,9 +111,17 @@ export const AddDispatchModal: React.FC<AddDispatchModalProps> = ({
   const [isAddClientModalOpen, setIsAddClientModalOpen] = useState(false);
   const [initialNewClientName, setInitialNewClientName] = useState('');
 
+  // Unsaved Changes and System State
+  const [showUnsavedPrompt, setShowUnsavedPrompt] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [isDirty, setIsDirty] = useState(false);
+
   // Pre-fill state initialization when modal opens or prefill data is supplied
   useEffect(() => {
     if (isOpen) {
+      setIsDirty(false);
+      setErrorMessage(null);
+      setShowUnsavedPrompt(false);
       if (initialPrefillData) {
         // Automatically pre-fill ONLY the information available from Forwarding Progressive record
         setClientName(initialPrefillData.clientName || 'Intelligent Skin Care Inc.');
@@ -215,11 +224,26 @@ export const AddDispatchModal: React.FC<AddDispatchModalProps> = ({
     }
   };
 
+  const handleAttemptClose = () => {
+    if (isDirty) {
+      setShowUnsavedPrompt(true);
+    } else {
+      onClose();
+    }
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    setErrorMessage(null);
+
+    if (!clientName.trim() || !podNumber.trim()) {
+      setErrorMessage('Unable to save record. Please try again.');
+      return;
+    }
 
     // Duplicate protection guard
     if (matchingExistingDispatch) {
+      setErrorMessage('A record with this POD or Reference Number already exists.');
       return;
     }
 
@@ -230,7 +254,8 @@ export const AddDispatchModal: React.FC<AddDispatchModalProps> = ({
         id: `client-${Date.now()}`,
         name: clientName.trim(),
         code: `${clientName.trim().slice(0, 3).toUpperCase()}-${Math.floor(100 + Math.random() * 900)}`,
-        accountManager: 'Maria Santos (OFII Key Accounts)',
+        assignedCoordinator: 'Alodia Manalansan',
+        accountManager: 'Alodia Manalansan',
         industry: 'General Freight & Logistics Consignment',
         activeShipments: 1,
         deliveredThisMonth: 0,
@@ -296,7 +321,7 @@ export const AddDispatchModal: React.FC<AddDispatchModalProps> = ({
 
             <button
               type="button"
-              onClick={onClose}
+              onClick={handleAttemptClose}
               className="p-1.5 rounded text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
             >
               <X className="w-5 h-5" />
@@ -304,7 +329,18 @@ export const AddDispatchModal: React.FC<AddDispatchModalProps> = ({
           </div>
 
           {/* Modal Form - Organized in 4 Distinct Sections */}
-          <form onSubmit={handleSubmit} className="p-6 space-y-5 overflow-y-auto text-xs text-slate-700 bg-slate-50/40">
+          <form 
+            onSubmit={handleSubmit} 
+            onChange={() => setIsDirty(true)}
+            className="p-6 space-y-5 overflow-y-auto text-xs text-slate-700 bg-slate-50/40"
+          >
+            {/* ERROR STATE BANNER */}
+            {errorMessage && (
+              <div className="p-3.5 bg-rose-50 border border-rose-300 rounded-lg flex items-center gap-2.5 text-rose-900 animate-in fade-in">
+                <ShieldAlert className="w-4 h-4 text-rose-700 shrink-0" />
+                <span className="font-semibold">{errorMessage}</span>
+              </div>
+            )}
             
             {/* Forwarding -> Dispatch Notification Banner (When pre-filled) */}
             {initialPrefillData && (
@@ -336,7 +372,7 @@ export const AddDispatchModal: React.FC<AddDispatchModalProps> = ({
                     <ShieldAlert className="w-5 h-5 text-amber-700 shrink-0 mt-0.5" />
                     <div>
                       <span className="font-bold text-amber-950 text-xs block">
-                        A Dispatch record already exists for this shipment.
+                        A record with this POD or Reference Number already exists.
                       </span>
                       <p className="text-[11px] text-amber-900 mt-0.5">
                         A record matching POD <strong>{matchingExistingDispatch.podNumber}</strong> is already registered in Daily Dispatching Monitoring (Dispatch ID: <strong>{matchingExistingDispatch.id}</strong> • Plate: <strong>{matchingExistingDispatch.plateNumber}</strong> • Status: <strong>{matchingExistingDispatch.status}</strong>).
@@ -839,7 +875,7 @@ export const AddDispatchModal: React.FC<AddDispatchModalProps> = ({
               <div className="flex items-center gap-3">
                 <button
                   type="button"
-                  onClick={onClose}
+                  onClick={handleAttemptClose}
                   className="px-5 py-2.5 rounded-lg text-xs font-semibold text-slate-700 hover:bg-slate-200 transition-colors cursor-pointer border border-slate-300 bg-white"
                 >
                   CANCEL
@@ -868,6 +904,19 @@ export const AddDispatchModal: React.FC<AddDispatchModalProps> = ({
         onClose={() => setIsAddClientModalOpen(false)}
         onSaveClient={handleSaveNewClient}
         initialClientName={initialNewClientName}
+      />
+
+      {/* Unsaved Changes Confirmation Modal */}
+      <UnsavedChangesModal
+        isOpen={showUnsavedPrompt}
+        onKeepEditing={() => setShowUnsavedPrompt(false)}
+        onConfirmDiscard={() => {
+          setShowUnsavedPrompt(false);
+          setIsDirty(false);
+          onClose();
+        }}
+        title="Unsaved Changes"
+        message="You have unsaved changes. Are you sure you want to leave?"
       />
     </>
   );

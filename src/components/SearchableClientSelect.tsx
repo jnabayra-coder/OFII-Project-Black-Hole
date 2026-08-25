@@ -182,7 +182,9 @@ export const SearchableClientSelect: React.FC<SearchableClientSelectProps> = ({
                           </span>
                         </div>
                         <div className="text-[10px] text-slate-500 truncate flex items-center gap-2 mt-0.5">
-                          <span>{client.industry}</span>
+                          {(client.assignedCoordinator || client.accountManager) && (
+                            <span className="text-blue-800 font-medium">Coord: {client.assignedCoordinator || client.accountManager}</span>
+                          )}
                           {client.area && (
                             <span className="text-slate-400">• {client.area}</span>
                           )}

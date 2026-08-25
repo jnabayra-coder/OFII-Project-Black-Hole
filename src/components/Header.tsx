@@ -7,9 +7,14 @@ import {
   MapPin, 
   CheckCircle2, 
   AlertTriangle, 
-  FileSpreadsheet
+  FileSpreadsheet,
+  Database,
+  RefreshCw,
+  Wifi,
+  WifiOff
 } from 'lucide-react';
 import { NavigationTab } from '../types';
+import { useData } from '../context/DataContext';
 
 interface HeaderProps {
   currentTab: NavigationTab;
@@ -25,6 +30,8 @@ export const Header: React.FC<HeaderProps> = ({
   selectedHub,
   onSelectHub,
 }) => {
+  const { syncStatus, refreshData, isLoading } = useData();
+
   const getPageTitle = () => {
     switch (currentTab) {
       case 'dashboard':
@@ -85,6 +92,37 @@ export const Header: React.FC<HeaderProps> = ({
       </div>
 
       <div className="flex items-center space-x-3">
+        {/* Real-time Cloud Database Status Pill */}
+        <div 
+          className={`hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded text-xs border font-medium transition-colors ${
+            syncStatus.isSyncing || isLoading
+              ? 'bg-amber-50 text-amber-800 border-amber-200'
+              : syncStatus.isConnected
+              ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+              : 'bg-slate-100 text-slate-700 border-slate-200'
+          }`}
+          title={syncStatus.lastSyncedAt ? `Last Synced: ${syncStatus.lastSyncedAt}` : 'Real-time database active'}
+        >
+          {syncStatus.isSyncing || isLoading ? (
+            <RefreshCw className="w-3 h-3 text-amber-600 animate-spin" />
+          ) : (
+            <Database className="w-3 h-3 text-emerald-600" />
+          )}
+          <span className="text-[11px]">
+            {syncStatus.isSyncing || isLoading 
+              ? 'Syncing DB...' 
+              : 'Cloud DB Active'}
+          </span>
+          <button
+            onClick={() => refreshData(true)}
+            disabled={syncStatus.isSyncing || isLoading}
+            className="ml-1 text-slate-400 hover:text-slate-700 disabled:opacity-50 p-0.5 rounded cursor-pointer transition-colors"
+            title="Force refresh from Supabase"
+          >
+            <RefreshCw className={`w-3 h-3 ${syncStatus.isSyncing ? 'animate-spin' : ''}`} />
+          </button>
+        </div>
+
         {/* Hub Selector */}
         <div className="hidden lg:flex items-center bg-slate-100 border border-slate-200 rounded px-2.5 py-1 text-xs text-slate-700">
           <MapPin className="w-3.5 h-3.5 text-blue-700 mr-1.5 shrink-0" />
@@ -104,10 +142,10 @@ export const Header: React.FC<HeaderProps> = ({
         {/* Live System Time / Date Badge */}
         <div className="hidden sm:flex items-center text-xs text-slate-600 bg-slate-50 border border-slate-200 px-2.5 py-1 rounded">
           <Clock className="w-3.5 h-3.5 text-slate-500 mr-1.5" />
-          <span>Today: <strong className="text-slate-800">Aug 23, 2026</strong></span>
+          <span>Today: <strong className="text-slate-800">Aug 25, 2026</strong></span>
         </div>
 
-        {/* Prototype Label */}
+        {/* SystemTMS Label */}
         <div className="text-[11px] font-medium px-2 py-0.5 rounded bg-blue-50 text-blue-800 border border-blue-200 hidden md:inline-flex items-center gap-1">
           <span className="w-1.5 h-1.5 rounded-full bg-blue-600"></span>
           <span>OFII Internal TMS</span>
@@ -116,3 +154,4 @@ export const Header: React.FC<HeaderProps> = ({
     </header>
   );
 };
+

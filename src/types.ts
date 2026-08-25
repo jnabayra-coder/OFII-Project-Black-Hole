@@ -245,6 +245,7 @@ export interface ClientSummary {
   id: string;
   name: string;
   code: string;
+  assignedCoordinator?: string;
   accountManager?: string;
   industry?: string;
   activeShipments?: number;
@@ -265,6 +266,7 @@ export interface ClientSummary {
   isDeleted?: boolean;
   deletedAt?: string;
   deletedBy?: string;
+  deleteReason?: string;
 }
 
 export interface ShipmentRecord {
@@ -366,3 +368,67 @@ export interface UserProfile {
   employeeId: string;
   hubLocation: string;
 }
+
+export interface BusinessRule {
+  id: string;
+  clientName?: string;
+  modeOfShipment?: ForwardingMode | string;
+  area?: PhilippineArea | string;
+  deliveryMethod?: string;
+  deliveryLeadTimeDays: number;
+  podLeadTimeDays?: number;
+  description?: string;
+  isActive: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface DatabaseSyncStatus {
+  isConnected: boolean;
+  isSyncing: boolean;
+  lastSyncedAt: string | null;
+  provider: 'supabase' | 'shared-cloud-sync';
+  errorMessage?: string | null;
+}
+
+export interface ImportHistoryRecord {
+  id: string;
+  fileName: string;
+  fileSize?: string;
+  importedAt: string;
+  importedBy: string;
+  totalRows: number;
+  successfullyImported: number;
+  warnings: number;
+  skipped: number;
+  status: 'Completed' | 'Partially Completed' | 'Failed';
+  details?: string;
+}
+
+export type OFIIFieldKey =
+  | 'none'
+  | 'client'
+  | 'consignee'
+  | 'modeOfShipment'
+  | 'area'
+  | 'referenceNumber'
+  | 'actualDispatchDate'
+  | 'podNumber'
+  | 'awbCourierRefNumber'
+  | 'quantity'
+  | 'unit'
+  | 'destinationCode'
+  | 'courier'
+  | 'deliveryStatus'
+  | 'actualDeliveryDate'
+  | 'receiversName'
+  | 'dateOfPodReturn'
+  | 'cbm'
+  | 'actualWeightKg'
+  | 'volumeWeightKg'
+  | 'chargeableWeightFees'
+  | 'declaredValue'
+  | 'reasonForDelay'
+  | 'podReasonForDelay'
+  | 'month';
+
